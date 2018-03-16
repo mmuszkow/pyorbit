@@ -56,7 +56,9 @@ class Satellite(Orbit):
 # check mpl_toolkits.basemap.Basemap for more advanced stuff
 class Earth:
     def __init__(self):
-        self.R = 6371 # km
+        # ellipsoidal model
+        self.R_EQUAT = 6371.137       # WSG-84
+        self.R_POLAR = 6356.752314245 # WSG-84
 
         # continents outlines
         sf = shapefile.Reader('ne_110m_coastline.shp')
@@ -71,9 +73,9 @@ class Earth:
     def lon_lat2xyz(self, lon, lat, alt):
         theta = radians(lon+180)
         phi = radians(lat+90)
-        x = -(self.R+alt) * sin(phi) * cos(theta)
-        y = -(self.R+alt) * sin(phi) * sin(theta)
-        z = -(self.R+alt) * cos(phi)
+        x = -(self.R_EQUAT+alt) * sin(phi) * cos(theta)
+        y = -(self.R_EQUAT+alt) * sin(phi) * sin(theta)
+        z = -(self.R_POLAR+alt) * cos(phi)
         return (x, y, z) 
 
     def xyz2lon_lat(self, x, y, z):
