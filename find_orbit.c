@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
-#include <omp.h>
+//#include <omp.h>
 
 #define PI         M_PI
 #define POW2(x)    ((x)*(x))
@@ -142,18 +142,18 @@ void find(int iters) {
     time_t t_start, t_estim;
     
     /* initialize */
-    #pragma omp parallel for
+    //#pragma omp parallel for
     for(i=initial_count; i<POP; i++) randomize(&pop[i]);
     qsort(pop, POP, sizeof(struct satellite), err_func_cmp);
 
     t_start = clock();
     for(j=0; j<iters;) {
         /* mutate & sort */
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for(i=0; i<POP; i++) mutate(&pop[i]);
         qsort(pop, POP, sizeof(struct satellite), err_func_cmp);
         /* remove worst 30% */
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for(i=(int)(0.7*POP); i<POP; i++) randomize(&pop[i]);
 
         j++;
