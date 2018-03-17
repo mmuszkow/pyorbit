@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# Tested on OSX High Sierra version
+# Tested on OSX High Sierra
 
-#clang -Xclang -fopenmp -I openmp/include -L openmp/lib -lomp -Wall -O3 find_orbit.c -o find_orbit
-#export DYLD_LIBRARY_PATH=/Users/mmuszkow/pyorbit/openmp/lib
-
-gcc -Wall -O3 find_orbit.c -o find_orbit
-for id in 25338 40069 28654 33591; do ./find_orbit n2yo.txt $id >> orbits.txt; done
+gcc -Wall -O3 find_orbit.c -march=native -o find_orbit && \
+for id in 25338 28654 40069 33591; do ./find_orbit n2yo.txt $id 5000 orbits_all_computed.txt >> orbits.txt; done
 
