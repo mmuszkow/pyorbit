@@ -101,7 +101,7 @@ class Earth:
         return paths
 
     def draw2d(self):
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(9,7))
         ax.set_xlim(-180, 180)
         ax.set_ylim(-90, 90)
         ax.grid(True)
@@ -121,9 +121,13 @@ class Earth:
             for path in self._safe_cross(lon_lat):
                 pplot = ax.plot([p[0] for p in path], [p[1] for p in path], color=color)
                 if not color: color = pplot[0].get_color()
+            # draw current position
             x, y, z = satellite.position(now)
-            lon_lat = self.xyz2lon_lat(x, y, z)
-            ax.scatter([lon_lat[0]], [lon_lat[1]], color=color)
+            arrow0 = self.xyz2lon_lat(x, y, z)
+            x, y, z = satellite.position(now+1)
+            arrow1 = self.xyz2lon_lat(x, y, z)
+            ax.annotate('', xytext=arrow0, xy=arrow1, \
+                        arrowprops=dict(ec=color, fc='white', arrowstyle='simple'))
             if satellite.name: patches.append(mpatches.Patch(color=color, label=satellite.name))
         
         ax.scatter([p[0] for p in self.markers], [p[1] for p in self.markers])
