@@ -7,14 +7,14 @@ from datetime import datetime
 import sys
 
 def dump():
-    norad_ids = [40069, 33591, 25338, 28654]
+    norad_ids = [20253, 17181] #[40069, 33591, 25338, 28654]
     #driver = webdriver.Safari()
     #driver = webdriver.PhantomJS()
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     driver = {}
     for norad_id in norad_ids:
-        driver[norad_id] = webdriver.Chrome(chrome_options=chrome_options)
+        driver[norad_id] = webdriver.Chrome(options=chrome_options)
         driver[norad_id].get('http://www.n2yo.com/?s=%d' % norad_id)
     while True:
         for norad_id in norad_ids:

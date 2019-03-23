@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -9,6 +10,7 @@
 #define POW2(x)    ((x)*(x))
 #define RADIANS(x) (((x)*PI)/180.0)
 #define PIx2       (2.0*PI)
+#define MI         3.986004418e14 // standard gravitational parameter
 
 struct satellite {
     double a, e;
@@ -22,14 +24,21 @@ struct xyzt {
     double x, y, z, t;
 };
 
+struct tle {
+    double a, e, period;
+};
+
 xrshr128p_state_t state;
 
 struct xyzt* data;
-int data_len;
+int data_len = 0;
+
+struct tle tle;
+bool tle_loaded = false;
 
 #define POP 100
 struct satellite pop[POP];
-int initial_count;
+int initial_count = 0;
 
 #define uniform(a, b) ((((b)-(a))*(xrshr128p_next_double(&state)))+(a))
 
@@ -68,12 +77,18 @@ void compute_err(struct satellite* sat) {
 }
 
 void randomize(struct satellite* sat) {
-    sat->a = uniform(7150.0, 7300.0);
-    sat->e = uniform(0.0, 0.03);
+    if(tle_loaded) {
+        sat->a = tle.a;
+        sat->e = tle.e;
+        sat->period = tle.period;
+    } else {
+        sat->a = uniform(7150.0, 7300.0);
+        sat->e = uniform(0.0, 0.03);
+        sat->period = uniform(100.0 * 60.0, 105.0 * 60.0);
+    } 
     sat->rot[0] = uniform(-PI, PI);
     sat->rot[1] = uniform(-PI, PI);
     sat->rot[2] = uniform(-PI, PI);
-    sat->period = uniform(100.0 * 60.0, 105.0 * 60.0);
     sat->angle0 = uniform(0.0, PIx2);
     compute_err(sat);
 }
@@ -83,34 +98,39 @@ void randomize(struct satellite* sat) {
 void mutate(struct satellite* sat) {
     struct satellite mutant;
     memcpy(&mutant, sat, sizeof(struct satellite));
-    switch(xrshr128p_next(&state)%7) {
-        case 0: mutant.a += uniform(-2.5, 2.5); break;
-        case 1: mutant.e += uniform(-0.01, 0.01); break;
-        case 2: {
-                mutant.rot[0] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
-                if(mutant.rot[0] > PI) mutant.rot[0] -= PIx2;
-                else if(mutant.rot[0] < -PI) mutant.rot[0] += PIx2;
-                break;
-                }
-        case 3: {
-                mutant.rot[1] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
-                if(mutant.rot[1] > PI) mutant.rot[1] -= PIx2;
-                else if(mutant.rot[1] < -PI) mutant.rot[1] += PIx2;
-                break;
-                }
-        case 4: {
-                mutant.rot[2] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
-                if(mutant.rot[2] > PI) mutant.rot[2] -= PIx2;
-                else if(mutant.rot[2] < -PI) mutant.rot[2] += PIx2;
-                break;
-                }
-        case 5: mutant.period += uniform(-30.0, 30.0); break;
-        case 6: {
+    switch(xrshr128p_next(&state)%(tle_loaded ? 4 :7)) {
+        case 0: {
                 mutant.angle0 += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
                 if(mutant.angle0 > PIx2) mutant.angle0 -= PIx2;
                 else if(mutant.angle0 < 0) mutant.angle0 += PIx2;
                 break;
                 }
+        case 1: {
+                mutant.rot[0] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
+                if(mutant.rot[0] > PI) mutant.rot[0] -= PIx2;
+                else if(mutant.rot[0] < -PI) mutant.rot[0] += PIx2;
+                break;
+                }
+        case 2: {
+                mutant.rot[1] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
+                if(mutant.rot[1] > PI) mutant.rot[1] -= PIx2;
+                else if(mutant.rot[1] < -PI) mutant.rot[1] += PIx2;
+                break;
+                }
+        case 3: {
+                mutant.rot[2] += uniform(-PI/ANGLE_DIV, PI/ANGLE_DIV);
+                if(mutant.rot[2] > PI) mutant.rot[2] -= PIx2;
+                else if(mutant.rot[2] < -PI) mutant.rot[2] += PIx2;
+                break;
+                }
+        case 4: mutant.a += uniform(-2.5, 2.5); break;
+        case 5: {
+                mutant.e += uniform(-0.001, 0.001);
+                if(mutant.e < 0) mutant.e = 0;
+                else if(mutant.e > 1) mutant.e = 1;
+                break;
+                }
+        case 6: mutant.period += uniform(-30.0, 30.0); break;
     }
     compute_err(&mutant);
     if(mutant.err < sat->err) memcpy(sat, &mutant, sizeof(struct satellite));
@@ -170,6 +190,67 @@ int count_lines(FILE* f) {
     return count;
 }
 
+void load_tle(const char* filename, int norad_id) {
+    FILE* fin;
+    int i, id, all_count, line_no;
+    double inc, asc, per, anom, revs_per_day, revs_per_day_rad_per_sec;
+    size_t line_len;
+    char ecc_buff[256] = "0.";
+    char* buff = NULL;
+
+    if((fin = fopen(filename, "r"))) {
+        all_count = count_lines(fin) / 3; // TLE always has 3 lines
+        for(i=0; i<all_count; i++) {
+            getline(&buff, &line_len, fin); // satellite name
+            getline(&buff, &line_len, fin); // some unuseful data
+            if(getline(&buff, &line_len, fin) < 0) { // useful data
+                fclose(fin);
+                return;
+            }
+
+            if(buff[0] != '2') // should be the second line
+                continue;
+        
+            // parse
+            sscanf(buff, "%d %d %lf %lf %s %lf %lf %lf", &line_no, &id, &inc, &asc, &ecc_buff[2], &per, &anom, &revs_per_day);
+            if(id == norad_id) {
+                tle.e = atof(ecc_buff);
+                tle.period = 86400.0 / revs_per_day;
+                revs_per_day_rad_per_sec = ((2.0 * PI) / 86400.0) * revs_per_day;
+                tle.a = cbrt(MI / POW2(revs_per_day_rad_per_sec)) / 1000.0;
+                fprintf(stderr, "TLE entry loaded: a=%lf e=%lf period=%lf\n", tle.a, tle.e, tle.period);
+                tle_loaded = true;
+                break;
+            }
+        }
+
+        fclose(fin);
+    }
+}
+
+void load_initial_data(const char* filename, int norad_id) {
+    FILE* fin; 
+    int i, id, all_count;
+    
+    if((fin = fopen(filename, "r"))) {
+        all_count = count_lines(fin);
+        if(all_count > POP)
+            all_count = POP;
+        for(i=0; i<all_count; i++) {
+            fscanf(fin, "%d\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n",
+                    &id, &pop[initial_count].a, &pop[initial_count].e,
+                    &pop[initial_count].rot[0], &pop[initial_count].rot[1],
+                    &pop[initial_count].rot[2], &pop[initial_count].period,
+                    &pop[initial_count].angle0);
+            if(id == norad_id)
+                compute_err(&pop[initial_count++]);
+
+        }
+        fclose(fin);
+        fprintf(stderr, "%d initial values loaded\n", initial_count);
+    }
+}
+
 int main(int argc, char** argv) {
     FILE* fin;
     int i, j, id, all_count, norad_id, iters;
@@ -177,8 +258,8 @@ int main(int argc, char** argv) {
     double lon, lat, alt;
     struct tm tm;
 
-    if(argc < 4) {
-        printf("Usage: %s <n2yo file> <norad_id> <iters> [initial]\n", argv[0]);
+    if(argc < 5) {
+        printf("Usage: %s <n2yo file> <norad_id> <iters> <TLE> [initial]\n", argv[0]);
         return 1;
     }
     
@@ -196,7 +277,6 @@ int main(int argc, char** argv) {
 
     /* count the ones with our NORAD id */
     all_count = count_lines(fin);
-    data_len = 0;
     for(i = 0; i < all_count; i++) {
         fscanf(fin, "%d %d-%d-%d_%d:%d:%d %lf %lf %lf\n",
                     &id, &year, &month, &day, &hour, &minu, &sec,
@@ -226,26 +306,15 @@ int main(int argc, char** argv) {
     }
     fclose(fin);
 
-    /* load initial values if specified */
-    initial_count = 0;
-    if(argc == 5 && (fin = fopen(argv[4], "r"))) {
-        all_count = count_lines(fin);
-        for(i=0; i<all_count; i++) {
-            fscanf(fin, "%d\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n",
-                    &id, &pop[initial_count].a, &pop[initial_count].e,
-                    &pop[initial_count].rot[0], &pop[initial_count].rot[1],
-                    &pop[initial_count].rot[2], &pop[initial_count].period,
-                    &pop[initial_count].angle0);
-            if(id == norad_id)
-                compute_err(&pop[initial_count++]);
+    /* load TLE data for our satellite */
+    load_tle(argv[4], norad_id);
 
-        }
-        fclose(fin);
-        fprintf(stderr, "%d initial values loaded\n", initial_count);
-    }
+    /* load initial values if specified */
+    if(argc == 6)
+        load_initial_data(argv[5], norad_id);
 
     fprintf(stderr, "%d entries loaded\n", data_len);
-    if(data_len > 0 && iters > 0) {
+    if(data_len > 0) {
         find(iters);
         printf("%d\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\n",
             norad_id, pop[0].a, pop[0].e,

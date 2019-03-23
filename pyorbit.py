@@ -84,6 +84,30 @@ class Earth:
         theta = atan2(y, x)
         return (degrees(theta), degrees(phi))
 
+    def central_angle(self, sat, t):
+        x, y, z = sat.position(t)
+        lon, lat = self.xyz2lon_lat(x, y, z)
+        r_h = sqrt(x**2 + y**2 + z**2) # sat distance from Earth center
+        x, y, z = self.lon_lat2xyz(lon, lat, 0)
+        r = sqrt(x**2 + y**2 + z**2)  # sphere radius in this specific point
+        dlon = degrees(acos(r/r_h))
+        
+        # latitude is a bit more tricky cause we use the spheroid model
+        # I use this system of equations to determine the 2 tangent points
+        # x**2/A**2 + y**2/B**2 = 1, Y = a*X + b, y = a*x + b
+        #A = self.R_EQUAT
+        #B = self.R_POLAR
+        #X = sqrt(r_h**2-z**2)
+        #Y = z
+        #x1 = A**2*(B**2*X + Y*sqrt(-A**2*B**2 + A**2*Y**2 + B**2*X**2))/(A**2*Y**2 + B**2*X**2)
+        #y1 = B**2*(A**2*Y - X*sqrt(-A**2*B**2 + A**2*Y**2 + B**2*X**2))/(A**2*Y**2 + B**2*X**2)
+        #x2 = A**2*(B**2*X - Y*sqrt(-A**2*B**2 + A**2*Y**2 + B**2*X**2))/(A**2*Y**2 + B**2*X**2)
+        #y2 = B**2*(A**2*Y + X*sqrt(-A**2*B**2 + A**2*Y**2 + B**2*X**2))/(A**2*Y**2 + B**2*X**2)
+        #print(self.xyz2lon_lat(x1, y1, z), (lon, lat))
+        # the difference is around 1 deg, it's negligible so we use the simpler method
+
+        return dlon
+        
     # this is used to avoid avoid artifacts when 
     # crossing -180/180 parallel for 2d plot
     def _safe_cross(self, lon_lat):
@@ -106,30 +130,42 @@ class Earth:
         ax.set_ylim(-90, 90)
         ax.grid(True)
 
+        # draw countries borders
         for outline in self.outlines:
             lon_lat = [self.xyz2lon_lat(p[0], p[1], p[2]) for p in outline]
             for path in self._safe_cross(lon_lat):
                 ax.plot([p[0] for p in path], [p[1] for p in path], color='gray', linewidth=1)
         
+        # draw satellites orbits predictions and access range
         patches = []
         for satellite in self.satellites:
             now = int(datetime.datetime.utcnow().timestamp())
-            trange = int(satellite.period/2) # draw this period both ways
+            
+            # draw orbit prediction
+            trange = 10*int(satellite.period/2) # draw this period both ways
             xyz = [satellite.position(t) for t in range(now-trange, now+trange, 60)]
             lon_lat = [self.xyz2lon_lat(p[0], p[1], p[2]) for p in xyz]
             color = None # we want all path parts and current position in the same color
             for path in self._safe_cross(lon_lat):
                 pplot = ax.plot([p[0] for p in path], [p[1] for p in path], color=color)
                 if not color: color = pplot[0].get_color()
-            # draw current position
+            
             x, y, z = satellite.position(now)
+            
+            # draw access range
+            alpha = self.central_angle(satellite, now)
+            lon, lat = self.xyz2lon_lat(x, y, z)
+            path = [(lon + alpha * sin(radians(t)), lat + alpha * cos(radians(t))) for t in range(0, 360)]
+            ax.plot([p[0] for p in path], [p[1] for p in path], '--', color=color, linewidth=1)
+
+            # draw current position
             arrow0 = self.xyz2lon_lat(x, y, z)
-            x, y, z = satellite.position(now+1)
+            x, y, z = satellite.position(now + 1)
             arrow1 = self.xyz2lon_lat(x, y, z)
             ax.annotate('', xytext=arrow0, xy=arrow1, \
                         arrowprops=dict(ec=color, fc='white', arrowstyle='simple'))
             if satellite.name: patches.append(mpatches.Patch(color=color, label=satellite.name))
-        
+         
         ax.scatter([p[0] for p in self.markers], [p[1] for p in self.markers])
         plt.legend(loc='center', bbox_to_anchor=(0.5, 1.05), ncol=len(patches), handles=patches)
         plt.show()
