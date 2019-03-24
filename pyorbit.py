@@ -142,7 +142,7 @@ class Earth:
             now = int(datetime.datetime.utcnow().timestamp())
             
             # draw orbit prediction
-            trange = 10*int(satellite.period/2) # draw this period both ways
+            trange = int(satellite.period/2) # draw this period both ways
             xyz = [satellite.position(t) for t in range(now-trange, now+trange, 60)]
             lon_lat = [self.xyz2lon_lat(p[0], p[1], p[2]) for p in xyz]
             color = None # we want all path parts and current position in the same color
